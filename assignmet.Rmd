@@ -1,0 +1,111 @@
+---
+title: "Assignment"
+author: "Kuldeep Jiwani"
+date: "30 July 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Assignment submission
+
+Submitting again with rmd and html formatted files.
+Earlier I was able to just submit it in plain text files as was short of time due to some urgent professional work pressures.
+
+## Introduction
+
+The fitness data of 6 participants was provided where every fitness movement was quantitatively measured. Then with the help of this data and expert observations these were classified into 5 classes of quality of excercise. Based on this we need to train a model and predict the quality of excercise for 20 new entries provided in test set.
+
+## Setting it up for analysis
+
+```{r basicLoad, message=FALSE}
+library(lattice)
+library(ggplot2)
+library(caret)
+pml_training <- read.csv("~/ds/R_Space/pml-training.csv")
+pml_testing <- read.csv("~/ds/R_Space/pml-testing.csv")
+```
+
+## Creating data sets for Cross validation
+```{r dataSplit, message=FALSE}
+pml_split <- createDataPartition(pml_training$classe, p=0.7, list=FALSE)
+pml_train <- pml_training[pml_split,]
+pml_test <- pml_training[-pml_split,]
+```
+
+### Data summary
+- The training data had 160 features present
+    - A quick inspection from summary command showed that majority of columns  are either NA or not varying much
+    - Moreover we know the accuracy of the model goes down after a point if we keep increasing no. of features
+
+## Data Cleaning
+- So first action was to cleanup up the redudndant features
+    - First used the nearZeroVars method
+        - populated list of names which had FALSE NZV (near zero value)
+        - The number of features came down from 160 -> 103
+
+```{r dataClean, message=FALSE, warnings=FALSE}
+pml_nzv <- nearZeroVar(pml_train, saveMetrics=TRUE)
+pml_no_nzv <- subset(pml_nzv, nzv %in% c(FALSE))
+pml_no_nzv_names <- rownames(pml_no_nzv)
+pml_train_nz <- pml_train[,(colnames(pml_train) %in% pml_no_nzv_names)]
+```
+
+    - Still columns with zero variance were present
+        - So applied the var method on the training data
+        - Created a list of variable which did not had zero variance
+        - The number of features came down from 103 -> 59
+    - Also removed the 2 factor variables user_name and cvtd_timestamp as they were not of any use
+        - So final features list came down from 59 -> 57
+
+```{r dataClean_2, message=FALSE, warnings=FALSE}
+pml_vars <- data.frame(lapply(pml_train_nz, var))
+pml_vars_nz <- pml_vars[ , unlist(lapply(pml_vars, function(x) !all(is.na(x))))]
+pml_final_names <- colnames(pml_vars_nz)
+pml_train_final <- pml_train_nz[,(colnames(pml_train_nz) %in% pml_final_names)]
+pml_train_final <- subset(pml_train_final, select=-c(user_name, cvtd_timestamp))
+```
+
+
+## Dimensionality reduction
+- The number of features were still on higher side
+    - Plotted featureplot to see is there a clear relation between the classe variable and majority of these 57, it was evident that not many have a direct clear relation
+- So applied PCA to capture 80% variance
+    - The number of features came down from 57 -> 15
+        
+```{r dimensionReduce, message=FALSE, warnings=FALSE}
+pml_pca_model <- preProcess(pml_train_final[,-57], method="pca", thresh=0.8)
+pca_comps <- predict(pml_pca_model, pml_train_final[,-57])
+pca_comps$classe <- pml_train_final$classe
+```
+
+## Model choice and training
+- Since the variable to predict "classe" was a factor variable so we cannot fit a linear model, which observes the change in output y for every change in input x
+    - So discarded all linear model algorithms
+    - Trees seemed to be the best choice, so tried RandomForest
+    
+```{r trainModel, message=FALSE, warnings=FALSE}
+pml_pca_rf_model <- train(classe ~ .,method="rf",data=pca_comps)
+```
+
+## Validation of model
+```{r validate, message=FALSE, warnings=FALSE}
+pml_test_nz <- pml_test[,(colnames(pml_test) %in% pml_no_nzv_names)]
+pml_test_final <- pml_test_nz[,(colnames(pml_test_nz) %in% pml_final_names)]
+pml_test_final <- subset(pml_test_final, select=-c(user_name, cvtd_timestamp))
+pca_comps_test <- predict(pml_pca_model, pml_test_final[,-57])
+confusionMatrix(pml_test_final$classe, predict(pml_pca_rf_model, pca_comps_test))
+```
+
+## Predicting results
+
+```{r predict, message=FALSE, warnings=FALSE}
+pml_testing_nz <- pml_testing[,(colnames(pml_testing) %in% pml_no_nzv_names)]
+pml_testing_final <- pml_testing_nz[,(colnames(pml_testing_nz) %in% pml_final_names)]
+pml_testing_final <- subset(pml_testing_final, select=-c(user_name, cvtd_timestamp))
+pca_comps_testings <- predict(pml_pca_model, pml_testing_final)
+
+predict(pml_pca_rf_model, pca_comps_testings)
+```
